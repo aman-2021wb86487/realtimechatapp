@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block title %}Chat Room - {{ username }}{% endblock %}
+{% block header %}Chat Room - {{ username }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="action-buttons">
+        <a href="/groups" class="btn">Manage Groups</a>
+        <a href="/logout" class="btn btn-secondary">Logout</a>
+    </div>
+    
+    <div class="chat-container">
+        <!-- Sidebar -->
+        <div class="chat-sidebar">
+            <!-- Contacts Section -->
+            <div class="sidebar-section">
+                <div class="section-header">Contacts</div>
+                <div class="section-content">
+                    <ul class="contact-list">
+                        {% for contact in contacts %}
+                            <li class="contact-item" data-username="{{ contact }}">
+                                <span class="status-indicator {% if contact in online_users %}status-online{% else %}status-offline{% endif %}"></span>
+                                {{ contact }}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Groups Section -->
+            <div class="sidebar-section">
+                <div class="section-header">Your Groups</div>
+                <div class="section-content">
+                    <ul class="group-list">
+                        {% for group in groups %}
+                            <li class="group-item" data-group-id="{{ group.id }}" data-group-name="{{ group.name }}">
+                                <span class="status-indicator status-online"></span>
+                                {{ group.name }}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Chat Area -->
+        <div class="chat-main">
+            <div id="chat-header" class="chat-header">
+                <h3 id="current-chat-name">Select a contact or group to start chatting</h3>
+                <div id="chat-info"></div>
+            </div>
+            
+            <div id="chat-messages" class="chat-messages">
+                <!-- Messages will be loaded here by JavaScript -->
+            </div>
+            
+            <div id="chat-input" class="chat-input" style="display: none;">
+                <input type="text" id="message-input" class="message-input" placeholder="Type your message..." autocomplete="off">
+                <button id="send-button" class="send-button">Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    const username = "{{ username }}";
+    let currentChat = {
+        type: null,   // 'private' or 'group'
+        id: null,     // username (for private) or group_id (for group)
+        name: null,   // display name
+        room: null    // room ID
+    };
+    
+    // Scroll to bottom of chat
+    function scrollToBottom() {
+        const chatMessages = document.getElementById('chat-messages');
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    // Format timestamp
+    function formatTimestamp(timestamp) {
+        return moment(timestamp).format('YYYY-MM-DD HH:mm:ss');
+    }
+    
+    // Handle received messages
+    socket.on('receive_message', function(data) {
+        // Only display if it matches the current chat
+        if (currentChat.room === data.room) {
+            appendMessage(data);
+        }
+    });
+    
+    // Update user list
+    socket.on('update_user_list', function(users) {
+        // Update online status indicators
+        document.querySelectorAll('.contact-item').forEach(item => {
+            const contact = item.dataset.username;
+            const indicator = item.querySelector('.status-indicator');
+            if (users.includes(contact)) {
+                indicator.classList.remove('status-offline');
+                indicator.classList.add('status-online');
+            } else {
+                indicator.classList.remove('status-online');
+                indicator.classList.add('status-offline');
+            }
+        });
+    });
+    
+    // User joined room
+    socket.on('user_joined', function(data) {
+        if (currentChat.room === data.room) {
+            appendSystemMessage(`${data.username} joined the chat`);
+        }
+    });
+    
+    // User left room
+    socket.on('user_left', function(data) {
+        if (currentChat.room === data.room) {
+            appendSystemMessage(`${data.username} left the chat`);
+        }
+    });
+    
+    // Append a system message
+    function appendSystemMessage(message) {
+        const chatMessages = document.getElementById('chat-messages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message system';
+        messageDiv.innerHTML = `<div class="message-content">${message}</div>`;
+        chatMessages.appendChild(messageDiv);
+        scrollToBottom();
+    }
+    
+    // Append a user message
+    function appendMessage(data) {
+        const chatMessages = document.getElementById('chat-messages');
+        const messageDiv = document.createElement('div');
+        
+        const isSent = data.sender === username;
+        const messageClasses = `message ${isSent ? 'sent' : 'received'} ${data.type}`;
+        
+        messageDiv.className = messageClasses;
+        
+        let indicator = '';
+        if (data.type === 'private') {
+            indicator = `<span class="private-indicator">🔒 Private</span>`;
+        } else if (data.type === 'group') {
+            indicator = `<span class="group-indicator">👥 ${data.group_name}</span>`;
+        }
+        
+        messageDiv.innerHTML = `
+            <div class="message-info">
+                <strong>${data.sender}</strong>
+                ${indicator}
+                <span class="timestamp">${formatTimestamp(data.timestamp)}</span>
+            </div>
+            <div class="message-content">${data.message}</div>
+        `;
+        
+        chatMessages.appendChild(messageDiv);
+        scrollToBottom();
+    }
+    
+    // Load chat history
+    function loadChatHistory() {
+        const chatMessages = document.getElementById('chat-messages');
+        chatMessages.innerHTML = '<div class="loading">Loading messages...</div>';
+        
+        let url, params;
+        if (currentChat.type === 'private') {
+            url = '/api/private-messages';
+            params = `other_user=${currentChat.id}`;
+        } else if (currentChat.type === 'group') {
+            url = '/api/group-messages';
+            params = `group_id=${currentChat.id}`;
+        } else {
+            return;
+        }
+        
+        fetch(`${url}?${params}`)
+            .then(response => response.json())
+            .then(messages => {
+                chatMessages.innerHTML = '';
+                
+                if (messages.length === 0) {
+                    appendSystemMessage('No messages yet. Start the conversation!');
+                    return;
+                }
+                
+                messages.forEach(message => {
+                    const data = {
+                        sender: message.sender,
+                        message: message.content,
+                        timestamp: message.timestamp,
+                        type: currentChat.type,
+                        room: currentChat.room
+                    };
+                    if (currentChat.type === 'group') {
+                        data.group_name = currentChat.name;
+                    }
+                    appendMessage(data);
+                });
+                scrollToBottom();
+            })
+            .catch(error => {
+                console.error('Error loading messages:', error);
+                chatMessages.innerHTML = '<div class="error">Error loading messages</div>';
+            });
+    }
+    
+    // Set active chat
+    function setActiveChat(type, id, name) {
+        // Clear active classes
+        document.querySelectorAll('.contact-item, .group-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        
+        // Set current chat
+        currentChat = { type, id, name };
+        
+        // Update UI
+        document.getElementById('current-chat-name').textContent = name;
+        document.getElementById('chat-input').style.display = 'flex';
+        
+        // Create room ID
+        if (type === 'private') {
+            currentChat.room = `private_${[username, id].sort().join('_')}`;
+        } else if (type === 'group') {
+            currentChat.room = `group_${id}`;
+        }
+        
+        // Join the room
+        socket.emit('join_room', {
+            type: type,
+            target: id
+        });
+        
+        // Load chat history
+        loadChatHistory();
+        
+        // Add active class to selected item
+        if (type === 'private') {
+            const item = document.querySelector(`.contact-item[data-username="${id}"]`);
+            if (item) item.classList.add('active');
+        } else {
+            const item = document.querySelector(`.group-item[data-group-id="${id}"]`);
+            if (item) item.classList.add('active');
+        }
+    }
+    
+    // Handle contact selection
+    document.querySelectorAll('.contact-item').forEach(item => {
+        item.addEventListener('click', function() {
+            const contact = this.dataset.username;
+            setActiveChat('private', contact, contact);
+        });
+    });
+    
+    // Handle group selection
+    document.querySelectorAll('.group-item').forEach(item => {
+        item.addEventListener('click', function() {
+            const groupId = this.dataset.groupId;
+            const groupName = this.dataset.groupName || this.textContent;
+            setActiveChat('group', groupId, groupName);
+        });
+    });
+    
+    // Handle form submission
+    document.getElementById('send-button').addEventListener('click', function() {
+        sendMessage();
+    });
+    
+    document.getElementById('message-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
+    });
+    
+    function sendMessage() {
+        const input = document.getElementById('message-input');
+        const message = input.value.trim();
+        
+        if (message && currentChat.type && currentChat.id) {
+            socket.emit('send_message', {
+                message: message,
+                type: currentChat.type,
+                target: currentChat.id
+            });
+            input.value = '';
+            input.focus();
+        }
+    }
+    
+    // Auto-focus input on load
+    document.getElementById('message-input')?.focus();
+    
+    // Auto-open group if specified in URL
+    document.addEventListener('DOMContentLoaded', function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const groupId = urlParams.get('group_id');
+        
+        if (groupId) {
+            // Find the group element and click it
+            const groupElement = document.querySelector(`.group-item[data-group-id="${groupId}"]`);
+            if (groupElement) {
+                groupElement.click();
+            }
+        }
+    });
+</script>
+{% endblock %}

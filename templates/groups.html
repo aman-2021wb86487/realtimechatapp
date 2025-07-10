@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Groups{% endblock %}
+{% block header %}Manage Groups{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="action-buttons">
+        <a href="/create-group" class="btn">Create New Group</a>
+        <a href="/chat" class="btn btn-secondary">Back to Chat</a>
+    </div>
+    
+    <div class="section" style="margin-top: 20px;">
+        <h2>Your Groups</h2>
+        <div class="group-grid">
+            {% for group in all_groups %}
+                {% if group.id in user_groups %}
+                <div class="group-card">
+                    <div class="group-header">
+                        <h3>{{ group.name }}</h3>
+                    </div>
+                    <div class="group-body">
+                        <p>Created by: {{ group.created_by }}</p>
+                        <p>Members: {{ group.member_count }}</p>
+                    </div>
+                    <div class="group-footer">
+                        <a href="/chat?group_id={{ group.id }}" class="btn btn-secondary">
+                            Open Chat
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    
+    <div class="section" style="margin-top: 30px;">
+        <h2>All Groups</h2>
+        <div class="group-grid">
+            {% for group in all_groups %}
+                {% if group.id not in user_groups %}
+                <div class="group-card">
+                    <div class="group-header">
+                        <h3>{{ group.name }}</h3>
+                    </div>
+                    <div class="group-body">
+                        <p>Created by: {{ group.created_by }}</p>
+                        <p>Members: {{ group.member_count }}</p>
+                    </div>
+                    <div class="group-footer">
+                        <a href="/join-group/{{ group.id }}" class="btn">Join Group</a>
+                    </div>
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
